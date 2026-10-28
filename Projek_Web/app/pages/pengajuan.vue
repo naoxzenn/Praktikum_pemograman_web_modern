@@ -1,8 +1,12 @@
-
 <script setup lang="ts">
+definePageMeta({
+  middleware: ['role'],
+})
+
 const route = useRoute()
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiBase
+const { authHeaders } = useAuth()
 
 interface Layanan {
   id: number
@@ -16,6 +20,7 @@ interface ResponsPengajuan {
     nomor_pengajuan: string
     status: string
     layanan?: Layanan
+    estimasi_selesai?: string
   }
 }
 
@@ -27,9 +32,12 @@ const form = reactive({
   keterangan: ''
 })
 
+const dokumenFile = ref<File | null>(null)
+const dokumenError = ref('')
 const sudahDiperiksa = ref(false)
 const nomorPengajuan = ref('')
 const statusPengajuan = ref('')
+const estimasiSelesai = ref('')
 const kesalahan = ref('')
 const sedangMengirim = ref(false)
 
@@ -52,6 +60,35 @@ watch(layanan, (daftar) => {
   }
 }, { immediate: true })
 
+function handleFileChange(event: Event) {
+  dokumenError.value = ''
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) {
+    dokumenFile.value = null
+    return
+  }
+
+  // Validasi ukuran max 5MB
+  if (file.size > 5 * 1024 * 1024) {
+    dokumenError.value = 'Ukuran file melebihi batas maksimal 5MB.'
+    dokumenFile.value = null
+    target.value = ''
+    return
+  }
+
+  // Validasi tipe file
+  const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']
+  if (!allowed.includes(file.type)) {
+    dokumenError.value = 'Hanya format PDF, PNG, atau JPG yang diperbolehkan.'
+    dokumenFile.value = null
+    target.value = ''
+    return
+  }
+
+  dokumenFile.value = file
+}
+
 function periksaFormulir() {
   kesalahan.value = ''
 
@@ -73,22 +110,35 @@ async function kirimPengajuan() {
   sedangMengirim.value = true
 
   try {
+    const formData = new FormData()
+    formData.append('layanan_id', String(form.layananId))
+    formData.append('nama_mahasiswa', form.nama.trim())
+    formData.append('nim', form.nim.trim())
+    formData.append('email', form.email.trim())
+    if (form.keterangan.trim()) {
+      formData.append('keterangan', form.keterangan.trim())
+    }
+    if (dokumenFile.value) {
+      formData.append('dokumen', dokumenFile.value)
+    }
+
     const respons = await $fetch<ResponsPengajuan>(
       `${apiUrl}/pengajuan`,
       {
         method: 'POST',
-        body: {
-          layanan_id: form.layananId,
-          nama_mahasiswa: form.nama.trim(),
-          nim: form.nim.trim(),
-          email: form.email.trim()
-        }
+        body: formData,
+        headers: authHeaders(),
       }
     )
 
     nomorPengajuan.value = respons.data.nomor_pengajuan
     statusPengajuan.value = respons.data.status
+    estimasiSelesai.value = respons.data.estimasi_selesai || ''
   } catch (error: any) {
+    if (error.status === 401 || error.statusCode === 401) {
+      await navigateTo('/login')
+      return
+    }
     kesalahan.value =
       error.data?.message ||
       'Pengajuan gagal dikirim. Periksa koneksi ke server Laravel.'
@@ -132,7 +182,7 @@ async function kirimPengajuan() {
           Daftar layanan gagal dimuat. Periksa server Laravel.
         </p>
 
-        <template v-else>       
+        <template v-else>
           <AppField
             v-model="form.nama"
             label="Nama mahasiswa"
@@ -161,7 +211,6 @@ async function kirimPengajuan() {
             required
           />
 
-
           <div class="field">
             <label for="layanan">Jenis layanan</label>
             <select
@@ -177,6 +226,26 @@ async function kirimPengajuan() {
                 {{ item.nama }}
               </option>
             </select>
+          </div>
+
+          <div class="field">
+            <label for="dokumen">
+              Lampiran Dokumen Pendukung (Opsional, PDF/JPG/PNG maks. 5MB)
+            </label>
+            <input
+              id="dokumen"
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg"
+              @change="handleFileChange"
+            />
+            <small v-if="dokumenFile" class="file-info">
+              File terpilih: {{ dokumenFile.name }} ({{ (dokumenFile.size / 1024).toFixed(1) }} KB)
+            </small>
+            <AppAlert
+              v-if="dokumenError"
+              type="error"
+              :message="dokumenError"
+            />
           </div>
 
           <div class="field">
@@ -221,6 +290,14 @@ async function kirimPengajuan() {
               <strong>Keterangan:</strong>
               {{ form.keterangan || 'Tidak ada' }}
             </p>
+            <p>
+              <strong>Dokumen Lampiran:</strong>
+              {{ dokumenFile ? dokumenFile.name : 'Tidak ada' }}
+            </p>
+            <p v-if="layananTerpilih?.sla_hari_kerja">
+              <strong>Estimasi Waktu Layanan:</strong>
+              {{ layananTerpilih.sla_hari_kerja }} Hari Kerja
+            </p>
 
             <button
               type="button"
@@ -237,20 +314,7 @@ async function kirimPengajuan() {
   </main>
 </template>
 
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-
-.field label {
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.5;
-}
-
+<style scoped>
 .field select,
 .field textarea {
   box-sizing: border-box;
@@ -277,3 +341,4 @@ async function kirimPengajuan() {
   outline: 2px solid #78b49d;
   outline-offset: 2px;
 }
+</style>

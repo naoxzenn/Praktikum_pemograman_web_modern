@@ -6,6 +6,8 @@ interface Layanan {
   deskripsi: string | null
 }
 
+const config = useRuntimeConfig()
+const apiUrl = config.public.apiBase
 const kataKunci = ref('')
 const route = useRoute()
 
@@ -15,7 +17,7 @@ const {
   error,
   refresh
 } = await useFetch<Layanan[]>(
-  'http://127.0.0.1:8000/api/layanan'
+  `${apiUrl}/layanan`
 )
 
 const daftarLayanan = computed(() => layanan.value ?? [])
